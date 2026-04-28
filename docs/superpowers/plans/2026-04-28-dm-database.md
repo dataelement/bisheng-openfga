@@ -77,13 +77,13 @@ mkdir -p /Users/zhangguoqing/works/openfga/assets/migrations/dm
 ```sql
 -- +goose Up
 CREATE TABLE tuple (
-    store CHAR(26) NOT NULL,
+    store VARCHAR(26) NOT NULL,
     object_type VARCHAR(128) NOT NULL,
     object_id VARCHAR(128) NOT NULL,
     relation VARCHAR(50) NOT NULL,
     _user VARCHAR(256) NOT NULL,
     user_type VARCHAR(7) NOT NULL,
-    ulid CHAR(26) NOT NULL,
+    ulid VARCHAR(26) NOT NULL,
     inserted_at TIMESTAMP NOT NULL,
     PRIMARY KEY (store, object_type, object_id, relation, _user)
 );
@@ -91,15 +91,15 @@ CREATE TABLE tuple (
 CREATE UNIQUE INDEX idx_tuple_ulid ON tuple (ulid);
 
 CREATE TABLE authorization_model (
-    store CHAR(26) NOT NULL,
-    authorization_model_id CHAR(26) NOT NULL,
+    store VARCHAR(26) NOT NULL,
+    authorization_model_id VARCHAR(26) NOT NULL,
     type VARCHAR(256) NOT NULL,
     type_definition BLOB,
     PRIMARY KEY (store, authorization_model_id, type)
 );
 
 CREATE TABLE store (
-    id CHAR(26) PRIMARY KEY,
+    id VARCHAR(26) PRIMARY KEY,
     name VARCHAR(64) NOT NULL,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP,
@@ -107,20 +107,20 @@ CREATE TABLE store (
 );
 
 CREATE TABLE assertion (
-    store CHAR(26) NOT NULL,
-    authorization_model_id CHAR(26) NOT NULL,
+    store VARCHAR(26) NOT NULL,
+    authorization_model_id VARCHAR(26) NOT NULL,
     assertions BLOB,
     PRIMARY KEY (store, authorization_model_id)
 );
 
 CREATE TABLE changelog (
-    store CHAR(26) NOT NULL,
+    store VARCHAR(26) NOT NULL,
     object_type VARCHAR(256) NOT NULL,
     object_id VARCHAR(256) NOT NULL,
     relation VARCHAR(50) NOT NULL,
     _user VARCHAR(512) NOT NULL,
     operation INTEGER NOT NULL,
-    ulid CHAR(26) NOT NULL,
+    ulid VARCHAR(26) NOT NULL,
     inserted_at TIMESTAMP NOT NULL,
     PRIMARY KEY (store, ulid, object_type)
 );
@@ -288,8 +288,8 @@ Expected: no errors
 **Files:**
 - Create: `pkg/storage/dm/dm.go`
 
-This is the largest task. The implementation mirrors `pkg/storage/mysql/mysql.go` with three DM-specific differences:
-1. Connection string parsing uses `net/url` (no dedicated DSN parser in the DM driver)
+This is the largest task. The implementation mirrors `pkg/storage/mysql/mysql.go` with these DM-specific differences:
+1. **Credential override in `New()`**: the DM `parseDSN` does NOT URL-decode credentials — it uses raw strings. Therefore `net/url.Parse` + `url.UserPassword` must NOT be used (they URL-encode on `String()`). Instead, parse/reconstruct the URI manually with string operations.
 2. `WriteAssertions` uses `MERGE INTO` instead of `ON DUPLICATE KEY UPDATE`
 3. `ReadChanges` interval expression uses `DATEADD` instead of `NOW() - INTERVAL`
 4. `HandleSQLError` maps DM error codes (not MySQL codes)
@@ -306,7 +306,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
@@ -354,20 +353,31 @@ var _ storage.OpenFGADatastore = (*Datastore)(nil)
 // New creates a new [Datastore] storage.
 func New(uri string, cfg *sqlcommon.Config) (*Datastore, error) {
 	if cfg.Username != "" || cfg.Password != "" {
-		parsed, err := url.Parse(uri)
-		if err != nil {
-			return nil, fmt.Errorf("parse dm connection uri: %w", err)
+		// DM parseDSN uses raw strings without URL-decoding, so net/url must NOT
+		// be used here (url.UserPassword would URL-encode the password on .String()).
+		// Manual parse: dm://user:password@host:port
+		rest := strings.TrimPrefix(uri, "dm://")
+		atIdx := strings.LastIndex(rest, "@")
+		var hostPart, username, password string
+		if atIdx >= 0 {
+			userPart := rest[:atIdx]
+			hostPart = rest[atIdx+1:]
+			if colonIdx := strings.Index(userPart, ":"); colonIdx >= 0 {
+				username = userPart[:colonIdx]
+				password = userPart[colonIdx+1:]
+			} else {
+				username = userPart
+			}
+		} else {
+			hostPart = rest
 		}
-		username := parsed.User.Username()
-		password, _ := parsed.User.Password()
 		if cfg.Username != "" {
 			username = cfg.Username
 		}
 		if cfg.Password != "" {
 			password = cfg.Password
 		}
-		parsed.User = url.UserPassword(username, password)
-		uri = parsed.String()
+		uri = fmt.Sprintf("dm://%s:%s@%s", username, password, hostPart)
 	}
 
 	db, err := sql.Open("dm", uri)
@@ -1194,25 +1204,36 @@ case "dm":
     driver = "dm"
     migrationsPath = assets.DMMigrationDir
 
-    dbURI, err := url.Parse(uri)
-    if err != nil {
-        return fmt.Errorf("invalid database uri: %w", err)
+    // DM parseDSN uses raw strings without URL-decoding; use string ops, not net/url.
+    if cfg.Username != "" || cfg.Password != "" {
+        rest := strings.TrimPrefix(uri, "dm://")
+        atIdx := strings.LastIndex(rest, "@")
+        var hostPart, username, password string
+        if atIdx >= 0 {
+            userPart := rest[:atIdx]
+            hostPart = rest[atIdx+1:]
+            if colonIdx := strings.Index(userPart, ":"); colonIdx >= 0 {
+                username = userPart[:colonIdx]
+                password = userPart[colonIdx+1:]
+            } else {
+                username = userPart
+            }
+        } else {
+            hostPart = rest
+        }
+        if cfg.Username != "" {
+            username = cfg.Username
+        }
+        if cfg.Password != "" {
+            password = cfg.Password
+        }
+        uri = fmt.Sprintf("dm://%s:%s@%s", username, password, hostPart)
     }
-    username := dbURI.User.Username()
-    password, _ := dbURI.User.Password()
-    if cfg.Username != "" {
-        username = cfg.Username
-    }
-    if cfg.Password != "" {
-        password = cfg.Password
-    }
-    dbURI.User = url.UserPassword(username, password)
-    uri = dbURI.String()
 ```
 
 - [ ] **Step 2: Add the blank import for the DM driver**
 
-The `migrate.go` file needs the DM driver registered even though it doesn't use the package directly. Add a blank import:
+The `migrate.go` file needs: (a) the DM driver registered, and (b) `"strings"` imported if not already present. Add the blank driver import:
 
 ```go
 import (
@@ -1341,6 +1362,27 @@ curl -s http://localhost:8080/healthz | jq .
 ```
 
 Expected: `{"status":"SERVING"}`
+
+---
+
+## Viability Probe Results (2026-04-28)
+
+Ran `cmd/dm-probe` against `192.168.107.9:5236` (DM V8):
+
+| Check | Result |
+|---|---|
+| Ping | ✓ |
+| Server version | `DM Database Server 64 V8` |
+| `CREATE TABLE` (VARCHAR) | ✓ |
+| `INSERT` with `?` placeholder | ✓ |
+| `SELECT` | ✓ |
+| `MERGE INTO ... FROM dual` (upsert) | ✓ |
+| `DATEADD(MICROSECOND, -N, NOW())` | ✓ |
+
+**Key findings that update the design:**
+- Password must NOT be URL-encoded — DM `parseDSN` uses raw strings
+- `CHAR(n)` fails for ASCII strings ≥ n/2 chars (server uses double-byte charset); use `VARCHAR(n)` throughout migrations
+- `MERGE INTO ... FROM dual` and `DATEADD` work as specified
 
 ---
 
