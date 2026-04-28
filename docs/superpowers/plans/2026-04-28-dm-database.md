@@ -1097,7 +1097,7 @@ func HandleSQLError(err error, args ...interface{}) error {
 		return storage.ErrNotFound
 	}
 
-	var dmErr *dmdriver.DMError
+	var dmErr *dmdriver.DmError
 	if errors.As(err, &dmErr) && dmErr.ErrCode == -6602 {
 		if len(args) > 0 {
 			if tk, ok := args[0].(*openfgav1.TupleKey); ok {
@@ -1312,7 +1312,7 @@ First run migrations:
 ```bash
 go run ./cmd/openfga migrate \
   --datastore-engine dm \
-  --datastore-uri "dm://SYSDBA:6o%2B%25s3z2NK7J@192.168.107.9:5236"
+  --datastore-uri "dm://SYSDBA:6o+%s3z2NK7J@192.168.107.9:5236"
 ```
 
 Expected: goose migrations run successfully, tables created.
@@ -1320,7 +1320,7 @@ Expected: goose migrations run successfully, tables created.
 Then run the integration test:
 
 ```bash
-OPENFGA_DM_URI="dm://SYSDBA:6o%2B%25s3z2NK7J@192.168.107.9:5236" \
+OPENFGA_DM_URI="dm://SYSDBA:6o+%s3z2NK7J@192.168.107.9:5236" \
   go test ./pkg/storage/dm/... -v -count=1 -timeout 120s
 ```
 
@@ -1342,7 +1342,7 @@ git commit -m "test(dm): add DaMeng integration test (skips without OPENFGA_DM_U
 ```bash
 go run ./cmd/openfga migrate \
   --datastore-engine dm \
-  --datastore-uri "dm://SYSDBA:6o%2B%25s3z2NK7J@192.168.107.9:5236"
+  --datastore-uri "dm://SYSDBA:6o+%s3z2NK7J@192.168.107.9:5236"
 ```
 
 - [ ] **Step 2: Start the server**
@@ -1350,7 +1350,7 @@ go run ./cmd/openfga migrate \
 ```bash
 go run ./cmd/openfga run \
   --datastore-engine dm \
-  --datastore-uri "dm://SYSDBA:6o%2B%25s3z2NK7J@192.168.107.9:5236"
+  --datastore-uri "dm://SYSDBA:6o+%s3z2NK7J@192.168.107.9:5236"
 ```
 
 Expected output includes: `using 'dm' storage engine`
@@ -1392,7 +1392,7 @@ Ran `cmd/dm-probe` against `192.168.107.9:5236` (DM V8):
 
 **`MERGE INTO ... FROM dual` fails:** Some DM versions need `FROM SYS.DUAL` explicitly. Replace `FROM dual` with `FROM SYS.DUAL` in `WriteAssertions`.
 
-**DM driver error type is not `dm.DMError`:** Run `go doc gitee.com/chunanyong/dm` and search for the exported error struct. Update `HandleSQLError` to match the actual type name and unique-constraint error code.
+**DM driver error type:** Confirmed as `*dm.DmError` with `ErrCode int32`. Unique constraint violation is `ErrCode == -6602`.
 
 **`DROP INDEX idx_name` fails:** Some DM versions require `DROP INDEX table_name.idx_name`. Update the `DOWN` migrations accordingly.
 
