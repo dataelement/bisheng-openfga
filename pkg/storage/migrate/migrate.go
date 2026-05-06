@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	_ "gitee.com/chunanyong/dm"
 	"github.com/go-sql-driver/mysql"
 	"github.com/pressly/goose/v3"
 	"go.uber.org/zap"
@@ -102,6 +104,35 @@ func RunMigrations(cfg MigrationConfig) error {
 		uri, err = sqlite.PrepareDSN(uri)
 		if err != nil {
 			return err
+		}
+	case "dm":
+		driver = "dm"
+		migrationsPath = assets.DMMigrationDir
+
+		// DM parseDSN uses raw strings without URL-decoding; use string ops, not net/url.
+		if cfg.Username != "" || cfg.Password != "" {
+			rest := strings.TrimPrefix(uri, "dm://")
+			atIdx := strings.LastIndex(rest, "@")
+			var hostPart, username, password string
+			if atIdx >= 0 {
+				userPart := rest[:atIdx]
+				hostPart = rest[atIdx+1:]
+				if colonIdx := strings.Index(userPart, ":"); colonIdx >= 0 {
+					username = userPart[:colonIdx]
+					password = userPart[colonIdx+1:]
+				} else {
+					username = userPart
+				}
+			} else {
+				hostPart = rest
+			}
+			if cfg.Username != "" {
+				username = cfg.Username
+			}
+			if cfg.Password != "" {
+				password = cfg.Password
+			}
+			uri = fmt.Sprintf("dm://%s:%s@%s", username, password, hostPart)
 		}
 	case "":
 		return fmt.Errorf("missing datastore engine type")

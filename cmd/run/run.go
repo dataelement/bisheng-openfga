@@ -78,6 +78,7 @@ import (
 	"github.com/openfga/openfga/pkg/server/health"
 	"github.com/openfga/openfga/pkg/storage"
 	"github.com/openfga/openfga/pkg/storage/memory"
+	"github.com/openfga/openfga/pkg/storage/dm"
 	"github.com/openfga/openfga/pkg/storage/mysql"
 	"github.com/openfga/openfga/pkg/storage/postgres"
 	"github.com/openfga/openfga/pkg/storage/sqlcommon"
@@ -522,6 +523,11 @@ func (s *ServerContext) datastoreConfig(config *serverconfig.Config) (storage.Op
 		datastore, err = sqlite.New(config.Datastore.URI, dsCfg)
 		if err != nil {
 			return nil, nil, fmt.Errorf("initialize sqlite datastore: %w", err)
+		}
+	case "dm":
+		datastore, err = dm.New(config.Datastore.URI, dsCfg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("initialize dm datastore: %w", err)
 		}
 	default:
 		return nil, nil, fmt.Errorf("storage engine '%s' is unsupported", config.Datastore.Engine)
