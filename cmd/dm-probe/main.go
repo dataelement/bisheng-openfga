@@ -38,7 +38,6 @@ func main() {
 	// 2. Server version
 	var version string
 	if err := db.QueryRowContext(ctx, "SELECT BANNER FROM V$VERSION WHERE ROWNUM = 1").Scan(&version); err != nil {
-		// Some DM versions expose version differently; fall back gracefully.
 		fmt.Printf("  (version query failed: %v)\n", err)
 	} else {
 		fmt.Printf("✓ server version: %s\n", version)

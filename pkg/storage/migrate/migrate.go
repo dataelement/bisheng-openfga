@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/url"
 	"strings"
@@ -49,6 +50,7 @@ func RunMigrations(cfg MigrationConfig) error {
 
 	var driver, migrationsPath string
 	var uri string
+	var preOpenedDB *sql.DB // non-nil for engines where goose.OpenDBWithDriver is not supported
 	// We set uri based on engine
 	uri = cfg.URI
 	switch cfg.Engine {
@@ -106,7 +108,6 @@ func RunMigrations(cfg MigrationConfig) error {
 			return err
 		}
 	case "dm":
-		driver = "dm"
 		migrationsPath = assets.DMMigrationDir
 
 		// DM parseDSN uses raw strings without URL-decoding; use string ops, not net/url.
@@ -134,15 +135,61 @@ func RunMigrations(cfg MigrationConfig) error {
 			}
 			uri = fmt.Sprintf("dm://%s:%s@%s", username, password, hostPart)
 		}
+
+		// goose.OpenDBWithDriver does not know the "dm" dialect; open the DB manually
+		// and use the MySQL goose dialect (DM is compatible except for the CREATE TABLE
+		// DDL which uses `bigint(20) unsigned` — DM does not support unsigned).
+		// Pre-create the goose version table with DM-compatible DDL, then seed the
+		// initial (0, applied=true) row that goose v3 requires; without it,
+		// GetDBVersion returns ErrNoNextVersion on an otherwise-empty table.
+		if err := goose.SetDialect("mysql"); err != nil {
+			return fmt.Errorf("set goose dialect for dm: %w", err)
+		}
+		var dbErr error
+		preOpenedDB, dbErr = sql.Open("dm", uri)
+		if dbErr != nil {
+			return fmt.Errorf("failed to open a connection to the datastore: %w", dbErr)
+		}
+
+		_, dbErr = preOpenedDB.ExecContext(context.Background(), `
+			CREATE TABLE IF NOT EXISTS goose_db_version (
+				id BIGINT AUTO_INCREMENT NOT NULL,
+				version_id BIGINT NOT NULL,
+				is_applied BOOLEAN NOT NULL,
+				tstamp TIMESTAMP DEFAULT NOW(),
+				PRIMARY KEY (id)
+			)`)
+		if dbErr != nil {
+			return fmt.Errorf("create goose version table for dm: %w", dbErr)
+		}
+		var rowCount int
+		dbErr = preOpenedDB.QueryRowContext(context.Background(),
+			"SELECT COUNT(1) FROM goose_db_version").Scan(&rowCount)
+		if dbErr != nil {
+			return fmt.Errorf("check goose version table for dm: %w", dbErr)
+		}
+		if rowCount == 0 {
+			_, dbErr = preOpenedDB.ExecContext(context.Background(),
+				"INSERT INTO goose_db_version (version_id, is_applied) VALUES (?, ?)", int64(0), true)
+			if dbErr != nil {
+				return fmt.Errorf("initialize goose version table for dm: %w", dbErr)
+			}
+		}
 	case "":
 		return fmt.Errorf("missing datastore engine type")
 	default:
 		return fmt.Errorf("unknown datastore engine type: %s", cfg.Engine)
 	}
 
-	db, err := goose.OpenDBWithDriver(driver, uri)
-	if err != nil {
-		return fmt.Errorf("failed to open a connection to the datastore: %w", err)
+	var db *sql.DB
+	var err error
+	if preOpenedDB != nil {
+		db = preOpenedDB
+	} else {
+		db, err = goose.OpenDBWithDriver(driver, uri)
+		if err != nil {
+			return fmt.Errorf("failed to open a connection to the datastore: %w", err)
+		}
 	}
 	defer db.Close()
 

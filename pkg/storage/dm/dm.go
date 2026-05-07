@@ -120,7 +120,8 @@ func NewWithDB(db *sql.DB, cfg *sqlcommon.Config) (*Datastore, error) {
 	}
 
 	stbl := sq.StatementBuilder.RunWith(db)
-	dbInfo := sqlcommon.NewDBInfo(stbl, HandleSQLError, "dm")
+	// Use "mysql" goose dialect — DM is MySQL-compatible for goose's internal versioning.
+	dbInfo := sqlcommon.NewDBInfo(stbl, HandleSQLError, "mysql")
 
 	return &Datastore{
 		stbl:                   stbl,
