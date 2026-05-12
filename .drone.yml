@@ -1,0 +1,89 @@
+kind: pipeline
+type: docker
+name: build-openfga
+
+clone:
+  disable: true
+
+steps:
+  - name: clone
+    image: alpine/git
+    pull: if-not-exists
+    environment:
+      http_proxy:
+        from_secret: PROXY
+      https_proxy:
+        from_secret: PROXY
+    commands:
+      - git clone https://github.com/dataelement/bisheng-openfga.git .
+      - git fetch --tags
+      - git checkout -q $DRONE_COMMIT
+
+  - name: build_and_push_docker
+    image: docker:cli
+    volumes:
+      - name: docker_sock
+        path: /var/run/docker.sock
+    environment:
+      NEXUS_USER:
+        from_secret: NEXUS_USER
+      NEXUS_PASSWORD:
+        from_secret: NEXUS_PASSWORD
+      DOCKER_BUILDKIT: "1"
+    commands:
+      - docker login -u $NEXUS_USER -p $NEXUS_PASSWORD 192.168.106.8:6082
+      # 构建 x86
+      - docker buildx build
+          --platform linux/amd64
+          --build-arg BUILDKIT_INLINE_CACHE=1
+          -t 192.168.106.8:6082/dataelement/openfga:${DRONE_TAG}
+          -f Dockerfile
+          --load .
+      - docker push 192.168.106.8:6082/dataelement/openfga:${DRONE_TAG}
+      # 构建 arm64
+      - docker buildx build
+          --platform linux/arm64
+          --build-arg BUILDKIT_INLINE_CACHE=1
+          -t 192.168.106.8:6082/dataelement/openfga:${DRONE_TAG}-arm64
+          -f Dockerfile
+          --load .
+      - docker push 192.168.106.8:6082/dataelement/openfga:${DRONE_TAG}-arm64
+
+  - name: notify-build-success
+    image: plugins/webhook
+    environment:
+      user_name: ${DRONE_COMMIT_AUTHOR_NAME}
+    settings:
+      debug: true
+      urls: https://open.feishu.cn/open-apis/bot/v2/hook/2cfe0d8d-647c-4408-9f39-c59134035c4b
+      content_type: application/json
+      template: |
+        {
+          "msg_type": "interactive",
+          "card": {
+            "type": "template",
+            "data": {
+              "template_id": "AAqkI9bnY5FUs",
+              "template_variable": {
+                "repo_name": "{{ repo.name }}",
+                "build_branch": "{{build.branch}}",
+                "build_author": "{{ $user_name }}",
+                "link": "{{build.link}}",
+                "commit_msg": "{{ trim build.message }}",
+                "build_tag": "{{build.tag}}",
+                "build_start": "{{build.started}}"
+              }
+            }
+          }
+        }
+
+trigger:
+  event:
+    - tag
+  ref:
+    - refs/tags/v*
+
+volumes:
+  - name: docker_sock
+    host:
+      path: /var/run/docker.sock
