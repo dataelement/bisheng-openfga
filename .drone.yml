@@ -36,6 +36,7 @@ steps:
       - docker buildx build
           --platform linux/amd64
           --build-arg BUILDKIT_INLINE_CACHE=1
+          --build-arg GOPROXY=https://goproxy.cn,direct
           -t 192.168.106.8:6082/dataelement/openfga:${DRONE_TAG}
           -f Dockerfile
           --load .
@@ -44,6 +45,7 @@ steps:
       - docker buildx build
           --platform linux/arm64
           --build-arg BUILDKIT_INLINE_CACHE=1
+          --build-arg GOPROXY=https://goproxy.cn,direct
           -t 192.168.106.8:6082/dataelement/openfga:${DRONE_TAG}-arm64
           -f Dockerfile
           --load .
