@@ -155,7 +155,7 @@ func RunMigrations(cfg MigrationConfig) error {
 			CREATE TABLE IF NOT EXISTS goose_db_version (
 				id BIGINT AUTO_INCREMENT NOT NULL,
 				version_id BIGINT NOT NULL,
-				is_applied BOOLEAN NOT NULL,
+				is_applied TINYINT NOT NULL,
 				tstamp TIMESTAMP DEFAULT NOW(),
 				PRIMARY KEY (id)
 			)`)
