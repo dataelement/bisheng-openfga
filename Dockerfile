@@ -2,7 +2,7 @@ FROM ghcr.io/grpc-ecosystem/grpc-health-probe:v0.4.48 AS grpc_health_probe
 
 # Use official golang image: supports amd64/arm64 multi-arch manifest,
 # and we cross-compile so the builder always runs on the host architecture.
-FROM golang:1.26 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26 AS builder
 
 ARG GOPROXY=https://goproxy.cn,direct
 # Injected automatically by `docker buildx build --platform`

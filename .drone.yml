@@ -32,6 +32,9 @@ steps:
       DOCKER_BUILDKIT: "1"
     commands:
       - docker login -u $NEXUS_USER -p $NEXUS_PASSWORD 192.168.106.8:6082
+      # 先由宿主机 daemon(已配代理)拉取基础镜像，避免 buildkit 取 docker.io metadata 时不走代理而超时。
+      # Dockerfile 用 --platform=$BUILDPLATFORM 交叉编译，amd64/arm64 构建都复用这一份 amd64 golang 镜像。
+      - docker pull --platform linux/amd64 golang:1.26
       # 构建 x86
       - docker buildx build
           --platform linux/amd64
