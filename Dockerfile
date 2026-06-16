@@ -5,9 +5,12 @@ FROM ghcr.io/grpc-ecosystem/grpc-health-probe:v0.4.48 AS grpc_health_probe
 FROM --platform=$BUILDPLATFORM golang:1.26 AS builder
 
 ARG GOPROXY=https://goproxy.cn,direct
-# Injected automatically by `docker buildx build --platform`
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
+# Injected automatically by `docker buildx build --platform`.
+# MUST be declared WITHOUT a default value — a default would shadow the
+# value BuildKit injects, forcing GOARCH back to that default (e.g. amd64)
+# and producing a wrong-arch binary for arm64 builds (exec format error).
+ARG TARGETOS
+ARG TARGETARCH
 
 # Prevent Go from downloading a newer toolchain (honours go.mod toolchain directive locally)
 ENV GOTOOLCHAIN=local
