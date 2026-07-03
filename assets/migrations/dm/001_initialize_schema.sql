@@ -11,7 +11,7 @@ CREATE TABLE tuple (
     PRIMARY KEY (store, object_type, object_id, relation, _user)
 );
 
-CREATE UNIQUE INDEX idx_tuple_ulid ON tuple (ulid);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tuple_ulid ON tuple (ulid);
 
 CREATE TABLE authorization_model (
     store VARCHAR(26) NOT NULL,
